@@ -1,0 +1,109 @@
+小抄的拓展 · 微端安装说明
+=========================
+安装包版本：{{VERSION}}（拓展脚本版本以 xc-ext/xc-ext.js 头部的 @version 为准）
+
+这个安装包做什么
+----------------
+官方三国杀微端本身不能装油猴脚本。xiaochao.org 的做法是提供「微端插件」：
+用一份改过的 app 目录替换 resources/app，让小抄脚本在微端里运行。
+本安装包不替换 app，而是在你已经装好的「小抄微端插件」上打一层补丁：
+
+1. 把「小抄的拓展」放到 resources/xc-ext/xc-ext.js；
+2. 给微端的页面 preload 加上注入代码，让拓展在页面脚本之前运行；
+3. 给微端插件的自动更新器打补丁，xiaochao.org 发布新版插件时，
+   更新完成后会自动重新注入拓展，不需要你手动重装。
+
+前置条件
+--------
+- 已安装官方三国杀微端；
+- 已按 xiaochao.org 的说明安装「微端插件」（微端的 resources 目录下有 app 文件夹）；
+  xiaochao.org 的步骤：关闭微端 → 把 app.zip、install.bat、restore.bat 放进 resources
+  （通常 C:\Program Files\SGSOL\resources）→ 右键 install.bat 以管理员身份运行。
+- 安装 / 更新 / 恢复前，请先完全退出三国杀微端（包括托盘图标）。
+
+
+Windows
+=======
+
+安装（推荐）
+------------
+1. 解压本安装包到任意位置（桌面、下载目录都可以）；
+2. 完全退出三国杀微端；
+3. 右键 install.bat，选择“以管理员身份运行”；
+   安装器会自动查找微端的 resources 目录（默认 C:\Program Files\SGSOL\resources）。
+   如果微端装在别的位置，可以在命令行里指定：
+       install.bat "D:\SGSOL\resources"
+4. 看到“安装成功”后，重新打开三国杀微端即可。
+
+更新拓展
+--------
+下载新版安装包，重新运行 install.bat 即可。拓展文件会被覆盖，微端设置、
+小抄缓存、账号配置都会保留。小抄微端插件本身的自动更新不受影响。
+
+注意：如果你重新运行过 xiaochao.org 微端插件自带的 install.bat（整包重装插件），
+插件会把 app 目录整个换掉，拓展会因此消失；重新运行一次本安装包即可恢复。
+
+卸载（恢复官方微端）
+--------------------
+右键 restore.bat，选择“以管理员身份运行”。
+注意：这会删除微端插件的 app 目录并还原官方 app.asar，小抄微端插件也会一起
+被移除；之后再想用，需要先重装插件，再运行本安装包。
+
+手动安装（install.bat 无法运行时）
+----------------------------------
+1. 完全退出三国杀微端；
+2. 把本安装包里的 xc-ext 文件夹整体复制到微端的 resources 目录
+   （复制后应有 resources\xc-ext\xc-ext.js）；
+3. 以管理员身份打开 PowerShell，执行（把路径换成你的 resources 目录）：
+       powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\SGSOL\resources\xc-ext\apply-patch.ps1" -AppDir "C:\Program Files\SGSOL\resources\app" -ResourcesDir "C:\Program Files\SGSOL\resources"
+4. 重新打开微端。
+
+手动卸载：删除 resources\app 目录，把 resources\app.asar.bak 改名为 app.asar，
+再删除 resources\xc-ext（与 xiaochao.org 微端插件的 restore.bat 等价）。
+
+
+macOS
+=====
+
+安装（推荐）
+------------
+1. 解压本安装包；
+2. 完全退出三国杀微端；
+3. 在安装包目录打开“终端”，执行：
+       sudo bash install.sh
+   默认微端位置是 /Applications/SGSOL.app/Contents/Resources；不在默认位置时：
+       sudo bash install.sh "/Applications/SGSOL.app/Contents/Resources"
+
+更新拓展
+--------
+下载新版安装包，重新执行 sudo bash install.sh 即可。
+（重新运行过 xiaochao.org 微端插件自带的 install.sh 之后，同样需要再运行一次本安装包。）
+
+卸载（恢复官方微端）
+--------------------
+在同一目录执行：
+       sudo bash restore.sh
+小抄微端插件也会一起被移除。
+
+手动安装
+--------
+1. 把 xc-ext 文件夹复制到微端的 Resources 目录；
+2. 执行：
+       bash "/Applications/SGSOL.app/Contents/Resources/xc-ext/apply-patch.sh" "/Applications/SGSOL.app/Contents/Resources/app" "/Applications/SGSOL.app/Contents/Resources"
+3. 重新打开微端。
+
+
+工作原理与注意
+--------------
+- 拓展通过微端的 webview preload，在页面脚本之前注入到游戏页主环境；
+  xiaochao 的小抄脚本仍然由微端插件自己注入，两者和网页版的行为一致。
+- 打开微端后，拓展照常拦截 xiaochao.org 通信、提供秒杀自动购买、95 折充值、
+  盖主速刷等功能；日志和网页版一样在页面 console。
+  想看日志：微端菜单里打开开发者工具（如果没有入口，一般是 Ctrl+Shift+I）。
+- 微端插件自动更新时，官方更新器需要管理员权限，这是 xiaochao.org 原有的行为；
+  更新完成后会调用 resources\xc-ext\apply-patch.ps1 / apply-patch.sh 重新注入。
+  如果 xiaochao.org 改了更新器结构导致自动补丁失败：
+  更新日志里会写 “xc-ext patch failed”，此时重新运行一次本安装包即可。
+- resources\xc-ext\patch-status.txt 记录了最近一次补丁结果，排查时可先看它。
+- 本安装包不包含、也不修改 xiaochao.org 的小抄脚本本身；小抄插件请从
+  xiaochao.org 官方获取。安装器只修改本机已经装好的微端插件文件。

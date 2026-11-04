@@ -1,0 +1,27 @@
+# 本机工作区与编辑器
+/.claude/
+/.codex/
+/.vscode/
+/.idea/
+*.swp
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# 第三方参考副本与本地调研
+/原版小抄/
+/小抄-*-iPad页面版.user.js
+/回归礼包可行性分析.md
+
+# 构建、打包及本地配置
+/工具/微端/输出/
+/release/
+node_modules/
+*.log
+.env
+.env.*
+!.env.example
+
+# 本地开发文档
+/AGENTS.md
+/更新日志.md

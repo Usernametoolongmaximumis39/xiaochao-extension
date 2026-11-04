@@ -1,0 +1,23 @@
+@echo off
+chcp 65001 >nul
+setlocal DisableDelayedExpansion
+set "XC_INSTALL_SCRIPT=%~f0"
+set "XC_INSTALL_ROOT=%~dp0"
+set "XC_RESOURCES=%~1"
+set "INSTALL_POWERSHELL=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+if not exist "%INSTALL_POWERSHELL%" (
+    echo 错误：无法使用 Windows PowerShell。
+    echo 请按照安装包内的 安装说明.txt 手动安装。
+    echo 按任意键继续。
+    pause >nul
+    exit /b 1
+)
+REM Read the embedded script as UTF-8; paths are passed through environment variables.
+"%INSTALL_POWERSHELL%" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; try { $source = [IO.File]::ReadAllText($env:XC_INSTALL_SCRIPT, [Text.Encoding]::UTF8); $marker = '# POWERSHELL_' + 'INSTALL_START'; $body = $source.Substring($source.IndexOf($marker) + $marker.Length); & ([ScriptBlock]::Create($body)) } catch { Write-Host ($_ | Out-String); exit 1 }"
+set "INSTALL_RESULT=%errorlevel%"
+echo.
+echo 按任意键继续。
+pause >nul
+exit /b %INSTALL_RESULT%
+
+# POWERSHELL_INSTALL_START
