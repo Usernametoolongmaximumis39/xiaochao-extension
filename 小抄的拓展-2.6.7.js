@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         小抄的拓展
-// @version      2.6.6
-// @description  小抄的拓展：拦截并阻止小抄脚本与 *.xiaochao.org 的所有网络通信（含 fetch / XHR / Worker / sendBeacon / Image / WebSocket / EventSource / window.open）；接管小抄 HUD 的“检测更新”按钮，并给“跳转被屏蔽”提示条补上关闭叉；「秒杀连点」面板支持自动购买所选物品；「盖主速刷」（盖主（小号）/ 反贼（大号）/ 点将（百胜））挂在「小抄 → 配置 → 游戏辅助」；官服 95 折充值；支持 iPad / 隔离世界油猴（移动端默认内置小抄），以及配合小抄微端插件在官方三国杀微端里运行（见 微端使用说明.md）。逐版本变更记录见 更新日志.md。
+// @version      2.6.7
+// @description  小抄的拓展：拦截并阻止小抄脚本与 *.xiaochao.org 的所有网络通信（含 fetch / XHR / Worker / sendBeacon / Image / WebSocket / EventSource / window.open）；接管小抄 HUD 的“检测更新”按钮，并给“跳转被屏蔽”提示条补上关闭叉；「秒杀连点」面板支持自动购买所选物品；「盖主速刷」（盖主（小号）/ 反贼（大号）/ 点将（百胜））挂在「小抄 → 配置 → 游戏辅助」；官服 95 折充值；心愿武将格数进度与武将/皮肤最近一次抽包增长；支持 iPad / 隔离世界油猴（移动端默认内置小抄），以及配合小抄微端插件在官方三国杀微端里运行（见 微端使用说明.md）。逐版本变更记录见 更新日志.md。
 // @author       -
 // @match        *://game.4399iw2.com/yxsgs/*
 // @match        *://my.4399.com/yxsgs/*
@@ -9027,8 +9027,190 @@
             }, true);
         }
 
+        // 心愿进度：服务端 ratio 已是当前心愿的非线性热度，不能用抽数/保底推算。
+        // 放在自包含工厂内，随隔离世界兼容层一起进入页面主环境。
+        var gzWishProgress = (function () {
+            var views = new Map();
+            var wrappers = new WeakMap();
+            var managers = {};
+            var lastScan = 0;
+            var watched = new WeakSet();
+            var specs = {
+                general: { view: 'GeneralWishWindow', read: 'GetCurUpGeneralDataByRound',
+                    send: 'OnSendDrawUpGeneralReq', data: 'onServerGeneralWishPoolDataResp',
+                    result: 'onServerDrawGeneralWishResp', change: 'OnSendClientChangeGeneralWishReq',
+                    update: 'updateGeneralItem' },
+                skin: { view: 'SkinUPMainWindow', read: 'GetCurUpSkinDataByRound',
+                    send: 'OnSendDrawUpSkinReq', data: 'onServerSkinWishPoolDataResp',
+                    result: 'onServerDrawSkinWishResp', change: 'OnSendClientChangeSkinWishReq',
+                    update: 'updateSkinItem' }
+            };
+
+            function visible(v) {
+                if (!v || v.destroyed || !v.parent) return false;
+                for (var n = v; n; n = n.parent) if (n.visible === false || n.destroyed) return false;
+                return true;
+            }
+            function observe(fn) { try { fn(); } catch (e) {} }
+            function hook(o, name, before, after) {
+                if (!o || typeof o[name] !== 'function') return;
+                var original = o[name];
+                if (wrappers.has(original)) return;
+                var wrapped = function () {
+                    var self = this, args = arguments;
+                    if (before) observe(function () { before(self, args); });
+                    var result = original.apply(self, args);
+                    if (after) observe(function () { after(self, args); });
+                    return result;
+                };
+                wrappers.set(wrapped, true);
+                o[name] = wrapped;
+                // ServerProxy.on 保存的是 Handler.method；仅替换实例方法不会影响已注册回调。
+                var proxy = GAME.klass('ServerProxy'), events = proxy && proxy._events;
+                if (events) Object.keys(events).forEach(function (key) {
+                    var list = Array.isArray(events[key]) ? events[key] : [events[key]];
+                    list.forEach(function (h) {
+                        if (h && h.caller === o && h.method === original) h.method = wrapped;
+                    });
+                });
+            }
+            function snapshot(kind, v) {
+                var m = managers[kind], sp = specs[kind];
+                if (!m || !v.vo) return null;
+                var d = m[sp.read](v.vo.RoundID);
+                if (!d || typeof d.ratio !== 'number' || !Number.isFinite(d.ratio) || d.ratio < 0 || d.ratio > 10000) return null;
+                var selected = m.GetSelectVoByRound(v.vo.RoundID, d.wish_item);
+                var count = selected && Number(selected.SplitNum);
+                if (!d.wish_item || !Number.isInteger(count) || count < 1) return null;
+                return { key: String(v.vo.RoundID) + ':' + d.wish_item + ':' + count,
+                    round: v.vo.RoundID, ratio: d.ratio, count: count };
+            }
+            function reset(v) { views.delete(v); }
+            function render(kind, v) {
+                if (!visible(v)) { reset(v); return; }
+                if (!watched.has(v) && typeof v.on === 'function' && window.Laya && window.Laya.Event) {
+                    watched.add(v);
+                    v.on(window.Laya.Event.UNDISPLAY || 'undisplay', v, function () { reset(v); });
+                }
+                var d = snapshot(kind, v), label = v.proBar && v.proBar.label;
+                if (!label) return;
+                if (!d) { reset(v); label.text = ''; return; }
+                var state = views.get(v);
+                if (!state || state.key !== d.key) {
+                    state = { kind: kind, key: d.key, current: d, delta: null, pending: null };
+                    views.set(v, state);
+                }
+                state.current = d;
+                var p = state.pending;
+                if (p && p.ok && p.after) {
+                    state.delta = p.after.ratio - p.before.ratio;
+                    state.pending = null;
+                }
+                var scale = kind === 'general' ? d.count / 10000 : 1 / 100;
+                var text = kind === 'general' ? (d.ratio * scale).toFixed(3) + '/' + d.count
+                    : (d.ratio / 100).toFixed(2) + '%';
+                if (state.delta !== null) {
+                    var delta = state.delta * scale;
+                    text += '（' + (delta >= 0 ? '+' : '-') + Math.abs(delta).toFixed(3)
+                        + (kind === 'skin' ? '%' : '') + '）';
+                }
+                label.text = text;
+                label.color = '#FAE7B1'; label.stroke = 1; label.strokeColor = '#3A250D';
+                label.width = 270; label.height = 24; label.align = 'left';
+                label.pos(18, v.proBar.height / 2 + 4);
+            }
+            function each(kind, fn) {
+                views.forEach(function (state, v) {
+                    if (!visible(v)) { reset(v); return; }
+                    if (state.kind === kind) fn(state, v);
+                });
+            }
+            function attachManager(kind, m) {
+                var sp = specs[kind];
+                if (!m || typeof m[sp.read] !== 'function' || typeof m.GetSelectVoByRound !== 'function') return;
+                managers[kind] = m;
+                hook(m, sp.send, function (_, args) {
+                    each(kind, function (s, v) {
+                        render(kind, v);
+                        s = views.get(v);
+                        if (s && String(s.current.round) === String(args[0]) && (args[1] === 1 || args[1] === 5)) {
+                            s.pending = { before: s.current, ok: false, after: null };
+                        }
+                    });
+                });
+                hook(m, sp.data, null, function (_, args) {
+                    var data = args[0] && args[0].Protocol && args[0].Protocol.Data;
+                    var body = data && data.ProtoObj;
+                    if (!body || body.result || !Array.isArray(body.list)) return;
+                    each(kind, function (s, v) {
+                        var d = snapshot(kind, v);
+                        if (s.pending && d && d.key === s.key && body.list.some(function (row) {
+                            return String(row.round) === String(d.round);
+                        })) s.pending.after = d;
+                        render(kind, v);
+                    });
+                });
+                hook(m, sp.result, null, function (_, args) {
+                    var data = args[0] && args[0].Protocol && args[0].Protocol.Data;
+                    var body = data && data.ProtoObj;
+                    each(kind, function (s, v) {
+                        if (!s.pending) return;
+                        if (!body || body.result) s.pending = null;
+                        else s.pending.ok = true;
+                        render(kind, v);
+                    });
+                });
+                hook(m, sp.change, function () {
+                    each(kind, function (s) { s.pending = null; s.delta = null; });
+                });
+            }
+            function attachView(kind, proto) {
+                if (!proto) return;
+                hook(proto, specs[kind].update, null, function (v) { render(kind, v); });
+                hook(proto, 'updateProgress', null, function (v) { render(kind, v); });
+                ['Reset', 'Remove', 'Clear'].forEach(function (name) {
+                    hook(proto, name, function (v) { reset(v); });
+                });
+            }
+            function tick() {
+                if (Date.now() - lastScan < 1000) return;
+                lastScan = Date.now();
+                var L = window.Laya;
+                if (!L || !L.stage) return;
+                // 固定窗口名 + 方法结构兜底，不创建游戏窗口或主动发送查询。
+                Object.keys(specs).forEach(function (kind) {
+                    var cls = L.ClassUtils && L.ClassUtils.getClass && L.ClassUtils.getClass(specs[kind].view);
+                    if (cls) attachView(kind, cls.prototype);
+                });
+                var proxy = GAME.klass('ServerProxy'), events = proxy && proxy._events;
+                if (events) Object.keys(events).forEach(function (key) {
+                    var handlers = Array.isArray(events[key]) ? events[key] : [events[key]];
+                    handlers.forEach(function (h) {
+                        var m = h && h.caller;
+                        if (!m) return;
+                        Object.keys(specs).forEach(function (kind) { attachManager(kind, m); });
+                    });
+                });
+                var queue = [L.stage], seen = new Set(), guard = 0;
+                while (queue.length && guard++ < 5000) {
+                    var v = queue.shift();
+                    if (!v || seen.has(v) || v.visible === false || v.destroyed) continue;
+                    seen.add(v);
+                    if (v.proBar && v.vo && typeof v.updateProgress === 'function') {
+                        var kind = typeof v.updateGeneralItem === 'function' ? 'general'
+                            : typeof v.updateSkinItem === 'function' ? 'skin' : null;
+                        if (kind) { attachView(kind, Object.getPrototypeOf(v)); render(kind, v); }
+                    }
+                    if (v._children) queue.push.apply(queue, v._children);
+                }
+                views.forEach(function (_, v) { if (!seen.has(v) || !visible(v)) reset(v); });
+            }
+            return { tick: tick };
+        })();
+
         function tick() {
             if (gzBootState !== 1) return;
+            try { gzWishProgress.tick(); } catch (e) { gzWarn('心愿进度更新异常', e); }
             gzEnsureEventHook();
             try { gzInstallBaiShengTouchFix(); } catch (e) {}
             gzEnsureMounted();
@@ -9322,7 +9504,7 @@
     function xcDiagSnapshot() {
         function safe(fn, d) { try { return fn(); } catch (e) { return d; } }
         var lines = [];
-        lines.push('小抄的拓展 v2.6.6 · iPad 兼容自检');
+        lines.push('小抄的拓展 v2.6.7 · iPad 兼容自检');
         lines.push('URL: ' + safe(function () { return location.href; }, ''));
         lines.push('UA: ' + safe(function () { return navigator.userAgent; }, ''));
         lines.push('管理器: ' + safe(function () {
@@ -9402,7 +9584,7 @@
                 'text-align:left;pointer-events:auto;';
 
             var title = document.createElement('div');
-            title.textContent = '小抄的拓展 v2.6.6 已运行';
+            title.textContent = '小抄的拓展 v2.6.7 已运行';
             title.style.cssText = 'font-weight:700;font-size:13px;margin-bottom:4px;';
 
             var msg = document.createElement('div');
@@ -9606,5 +9788,5 @@
     // 持续监测（每 3 秒检查一次，如果被覆盖就重装）
     setInterval(reinstallAll, 3000);
 
-    console.log(TAG, '小抄的拓展 v2.6.6 已启动：xiaochao.org 通信拦截 + 秒杀连点自动购买 + 95折充值 + 盖主速刷（配置 → 游戏辅助，反贼点将支持 不点将/随机/按序，不点将按按序点将排序挑人，新增「等1分钟」烧条；iPad/隔离世界自动注入页面主环境，触屏补发 touch，自动玩法时屏幕常亮；触屏设备上检测不到小抄 HUD 时显示自检卡片；缺 PC 运行时接口时自动补齐并触发小抄重新初始化；捕获小抄初始化错误到自检卡片；自动完成移动版 CtrUtil 的 Wasm 解密器初始化；识别小抄是否被油猴隔离在沙箱并提示使用 iPad 页面版；移动端默认内置小抄，无缓存弹窗下载、下载后提示重进，长按更新按钮开关自动检查更新；95折充值自动填玩家ID并支持打开支付宝；触屏点按可触发悬浮信息；百胜战功打不开时提供备用面板）');
+    console.log(TAG, '小抄的拓展 v2.6.7 已启动：xiaochao.org 通信拦截 + 秒杀连点自动购买 + 95折充值 + 心愿进度/本次增长 + 盖主速刷（配置 → 游戏辅助，反贼点将支持 不点将/随机/按序，不点将按按序点将排序挑人，新增「等1分钟」烧条；iPad/隔离世界自动注入页面主环境，触屏补发 touch，自动玩法时屏幕常亮；触屏设备上检测不到小抄 HUD 时显示自检卡片；缺 PC 运行时接口时自动补齐并触发小抄重新初始化；捕获小抄初始化错误到自检卡片；自动完成移动版 CtrUtil 的 Wasm 解密器初始化；识别小抄是否被油猴隔离在沙箱并提示使用 iPad 页面版；移动端默认内置小抄，无缓存弹窗下载、下载后提示重进，长按更新按钮开关自动检查更新；95折充值自动填玩家ID并支持打开支付宝；触屏点按可触发悬浮信息；百胜战功打不开时提供备用面板）');
 })();
