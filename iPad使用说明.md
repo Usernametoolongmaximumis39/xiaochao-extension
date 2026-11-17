@@ -1,5 +1,15 @@
 # iPad / Safari 油猴使用说明
 
+> **项目已停用（2026-11-17）**
+>
+> 「小抄的拓展」已停止使用与维护，不再提供功能更新或兼容性修复。请改用 **[三国杀 OL 工具箱](https://github.com/Usernametoolongmaximumis39/sgs-ol-toolbox)**。
+>
+> **[工具箱主页与安装指引](https://tools.3gs.xyz/) · [GitHub 项目](https://github.com/Usernametoolongmaximumis39/sgs-ol-toolbox) · [下载发布版本](https://github.com/Usernametoolongmaximumis39/sgs-ol-toolbox/releases/latest)**
+>
+> 迁移前请停用旧的「小抄的拓展」，并按工具箱当前文档安装；不要同时启用新旧脚本。旧版功能与设置是否可用、是否支持迁移，以工具箱当前说明为准。
+>
+> 以下内容仅作为历史资料保留，其中的旧版下载、安装、更新和兼容性说明不再作为当前使用指引。
+
 ## 结论先说（2.6.6 起）
 
 iPad 上**只需要安装一个** `小抄的拓展-2.6.7.js`：
